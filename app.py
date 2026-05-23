@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -194,6 +195,13 @@ with st.sidebar:
         2.0, 8.0, 5.0, 0.5,
         disabled=not split_subs,
     )
+    wrap_chars = st.slider(
+        "자막 한 줄 최대 글자수",
+        15, 40, 25, 1,
+        help="이 글자수를 넘으면 어절 경계에서 줄바꿈하고, 각 줄을 별도 자막으로 분리해 시간을 비례 배분합니다. "
+             "즉 한 화면에는 항상 한 줄만 보이고, 시간에 따라 차례로 바뀝니다. "
+             "0이면 OFF (원본 cue 그대로).",
+    )
 
     st.divider()
     st.header("실행")
@@ -284,6 +292,7 @@ if do_render:
         "--margin-v", str(margin_v),
         "--jobs", str(jobs),
         "--max-cue-seconds", f"{max_cue_seconds:.1f}",
+        "--wrap-chars", str(wrap_chars),
     ]
     if not split_subs:
         cmd.append("--no-split-subs")
@@ -310,7 +319,50 @@ if do_render:
 
 # ── Outputs ──────────────────────────────────────────────────────────────
 st.divider()
-st.subheader("산출물")
+head_l, head_r = st.columns([3, 1])
+head_l.subheader("산출물")
+
+# Collect produced files for this bundle. _work/ is treated separately.
+_produced_candidates = [
+    final_mp4, softsub_mp4, side_srt, mlt_path, report_json,
+]
+_produced = [p for p in _produced_candidates if p.exists()]
+_work_exists = work_dir.exists() and any(work_dir.iterdir())
+
+with head_r:
+    with st.popover("🗑 산출물 삭제", use_container_width=True, disabled=not (_produced or _work_exists)):
+        if not (_produced or _work_exists):
+            st.info("삭제할 산출물이 없습니다.")
+        else:
+            st.warning(
+                f"`{draft_dir.name}/` 안의 결과 파일만 지웁니다. "
+                f"`script/`, `images/`, `audio/`, `subtitles/`는 건드리지 않습니다."
+            )
+            if _produced:
+                st.markdown("**삭제 대상**")
+                for p in _produced:
+                    size = p.stat().st_size
+                    unit = f"{size / 1e6:.2f} MB" if size >= 1e6 else f"{size / 1024:.1f} KB"
+                    st.markdown(f"- `{p.name}` · {unit}")
+            also_work = st.checkbox(
+                "`_work/` 임시 폴더도 함께 삭제",
+                value=True,
+                disabled=not _work_exists,
+                help="씬별 임시 mp4·SRT·ffmpeg 로그가 들어있음 (디버깅용).",
+            )
+            if st.button("🗑 정말 삭제", type="primary", use_container_width=True):
+                removed = 0
+                for p in _produced:
+                    try:
+                        p.unlink()
+                        removed += 1
+                    except OSError as e:
+                        st.error(f"{p.name}: {e}")
+                if also_work and _work_exists:
+                    shutil.rmtree(work_dir, ignore_errors=True)
+                    removed += 1
+                st.success(f"{removed}개 항목 삭제됨")
+                st.rerun()
 
 if not draft_dir.exists():
     st.info("아직 렌더 결과가 없습니다. 사이드바에서 옵션을 정하고 **렌더 시작**을 누르세요.")

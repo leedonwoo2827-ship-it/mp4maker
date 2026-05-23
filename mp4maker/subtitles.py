@@ -27,6 +27,7 @@ def write_scene_srts(
     work_dir: Path,
     split_long_cues: bool = True,
     max_cue_duration: float = 5.0,
+    wrap_chars: int = 25,
 ) -> dict[int, Path]:
     """For every scene, write `work_dir / scNN.srt` with cues starting at 00:00:00.
 
@@ -59,11 +60,96 @@ def write_scene_srts(
         if split_long_cues:
             cues = _split_long_cues(cues, max_cue_duration=max_cue_duration)
 
+        if wrap_chars and wrap_chars > 0:
+            cues = _split_to_one_line_cues(cues, max_line_chars=wrap_chars)
+
         path = work_dir / f"sc{scene.index:02d}.srt"
         _write_srt(cues, path)
         out[scene.index] = path
 
     return out
+
+
+def _split_to_one_line_cues(
+    cues: list[pysrt.SubRipItem],
+    max_line_chars: int,
+) -> list[pysrt.SubRipItem]:
+    """Break each cue that would wrap into multiple lines into separate cues.
+
+    Strategy: greedy fill by 어절 (whitespace-separated). Each resulting line
+    becomes its own SRT cue, with the parent cue's duration split proportionally
+    to line character count. This guarantees one-line-at-a-time playback and
+    keeps Korean particles attached to their noun (e.g. '소포가' stays together).
+    """
+    out: list[pysrt.SubRipItem] = []
+    next_idx = 1
+    for cue in cues:
+        text = (cue.text or "").strip()
+        if not text:
+            continue
+
+        start_ms = _to_ms(cue.start)
+        end_ms = _to_ms(cue.end)
+        dur_ms = max(0, end_ms - start_ms)
+
+        lines = _wrap_into_lines(text, max_line_chars)
+        if len(lines) <= 1:
+            out.append(pysrt.SubRipItem(
+                index=next_idx,
+                start=_from_ms(start_ms),
+                end=_from_ms(end_ms),
+                text=lines[0] if lines else text,
+            ))
+            next_idx += 1
+            continue
+
+        total_chars = sum(len(line) for line in lines) or 1
+        cursor_ms = start_ms
+        last_i = len(lines) - 1
+        for i, line in enumerate(lines):
+            share = len(line) / total_chars
+            sub_dur = int(dur_ms * share)
+            sub_dur = max(int(_MIN_CUE * 1000), sub_dur)
+            sub_start = cursor_ms
+            sub_end = min(end_ms, sub_start + sub_dur)
+            if i == last_i:
+                sub_end = end_ms
+            if sub_end <= sub_start:
+                sub_end = min(end_ms, sub_start + int(_MIN_CUE * 1000))
+            out.append(pysrt.SubRipItem(
+                index=next_idx,
+                start=_from_ms(sub_start),
+                end=_from_ms(sub_end),
+                text=line,
+            ))
+            cursor_ms = sub_end
+            next_idx += 1
+    return out
+
+
+def _wrap_into_lines(text: str, max_line_chars: int) -> list[str]:
+    """Greedy word-boundary wrap returning a list of lines, none longer than max_line_chars."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= max_line_chars:
+        return [text]
+    words = text.split()
+    if not words:
+        return [text]
+    lines: list[str] = []
+    cur = ""
+    for w in words:
+        cand = f"{cur} {w}".strip() if cur else w
+        if len(cand) <= max_line_chars:
+            cur = cand
+        else:
+            if cur:
+                lines.append(cur)
+            cur = w
+    if cur:
+        lines.append(cur)
+    return lines or [text]
 
 
 def _split_long_cues(

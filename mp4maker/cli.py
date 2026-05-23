@@ -84,6 +84,8 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="keep long SRT cues as-is instead of breaking into sentences")
     p.add_argument("--max-cue-seconds", type=float, default=5.0,
                    help="when splitting, max seconds per cue (default 5.0)")
+    p.add_argument("--wrap-chars", type=int, default=25,
+                   help="max characters per subtitle line; line break at word boundary (default 25, 0 = disable)")
     p.add_argument("--version", action="version", version=f"mp4maker {__version__}")
     return p
 
@@ -176,6 +178,7 @@ def _cmd_render(args, bundle_dir: Path) -> int:
         bundle, timeline, bundle.work_dir,
         split_long_cues=not args.no_split_subs,
         max_cue_duration=args.max_cue_seconds,
+        wrap_chars=args.wrap_chars,
     )
 
     cfg = SceneRenderConfig(

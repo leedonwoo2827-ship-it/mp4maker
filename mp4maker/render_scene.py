@@ -61,6 +61,8 @@ def render_scene(
     # Alignment=2 → bottom-center. MarginV is the gap (in ASS units) from the
     # bottom of the frame to the bottom of the subtitle box, so small MarginV pushes
     # the line closer to the lower edge. BorderStyle=1 = outline+shadow (no opaque box).
+    # WrapStyle=2 means "no automatic wrap; only break at \\n we insert ourselves",
+    # which keeps Korean words like '소포가' from being chopped mid-word.
     style = (
         f"FontName={cfg.font_name},"
         f"FontSize={cfg.font_size},"
@@ -72,7 +74,8 @@ def render_scene(
         "Bold=1,"
         "Alignment=2,"
         "MarginL=80,MarginR=80,"
-        f"MarginV={cfg.margin_v}"
+        f"MarginV={cfg.margin_v},"
+        "WrapStyle=2"
     )
 
     filter_v = (
