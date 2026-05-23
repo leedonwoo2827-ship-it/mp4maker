@@ -82,10 +82,10 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="distance in ASS units from subtitle baseline to bottom of frame (default 40)")
     p.add_argument("--no-split-subs", action="store_true",
                    help="keep long SRT cues as-is instead of breaking into sentences")
-    p.add_argument("--max-cue-seconds", type=float, default=5.0,
-                   help="when splitting, max seconds per cue (default 5.0)")
-    p.add_argument("--wrap-chars", type=int, default=25,
-                   help="max characters per subtitle line; line break at word boundary (default 25, 0 = disable)")
+    p.add_argument("--max-cue-seconds", type=float, default=7.0,
+                   help="when splitting, max seconds per cue (default 7.0)")
+    p.add_argument("--wrap-chars", type=int, default=35,
+                   help="max characters per subtitle line; line break at word boundary (default 35, 0 = disable)")
     p.add_argument("--version", action="version", version=f"mp4maker {__version__}")
     return p
 
