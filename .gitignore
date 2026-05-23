@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Project content (large media, not source)
+_assets/
+_이미지작업전백업/
+
+# Logs / temp
+*.log
+
+# Claude scratch (kept locally, not versioned)
+.claude/
