@@ -1,112 +1,130 @@
 # mp4maker
 
-ScriptForge JSON + FlowGenie 이미지 + VoiceWright(슈퍼톤) 오디오/자막 번들을
-로컬 PC에서 ffmpeg로 직접 MP4로 합성하는 도구.
+ScriptForge JSON + FlowGenie 이미지 + VoiceWright(또는 Supertone) 오디오/자막 번들을
+**로컬 PC에서 ffmpeg로 직접 MP4로 합성**하는 도구. CapCut 없이도 완결되는 파이프라인.
 
-원래 파이프라인의 마지막 단계인 SceneWeaver-CapCut(CapCut 데스크톱 드래프트 생성)을
-대체해, CapCut 의존 없이 1080p 30fps MP4(burn-in 자막) + Shotcut용 MLT XML을 산출한다.
+CLI와 **웹 UI(Streamlit)** 둘 다 제공. CLI는 자동화·CI에, 웹 UI는 자막/모션 미세조정에.
 
-## 디렉토리 구조
+## 주요 기능
 
-```
-260523-mp4-maker/           ← 본 레포 루트
-├── mp4maker/               Python 패키지 (도구 소스)
-│   ├── __init__.py
-│   ├── __main__.py
-│   ├── cli.py
-│   ├── bundle.py
-│   ├── timeline.py
-│   ├── subtitles.py
-│   ├── fonts.py
-│   ├── kenburns.py
-│   ├── ffmpeg_runner.py
-│   ├── render_scene.py
-│   ├── concat.py
-│   ├── mlt.py
-│   └── report.py
-├── _assets/                작업 번들 (git 제외)
-│   ├── ch01_bundle/
-│   ├── ch02_bundle/
-│   └── ch04_bundle/
-│       ├── script/   chNN_script.json
-│       ├── images/   chNN_XX_*.{jpeg,jpg,png}
-│       ├── audio/    chNN_XX_narration.wav
-│       ├── subtitles/ chNN_XX_narration.srt (+ chNN.srt)
-│       └── draft/    ← 본 도구의 산출물 위치
-├── requirements.txt
-└── README.md
+| # | 항목 | 산출물 / 동작 |
+|---|---|---|
+| 1 | **풀 렌더** | `chNN_final.mp4` (1080p 30fps, burn-in 자막, Ken Burns, 씬 크로스페이드) |
+| 2 | **softsub MP4** | `chNN_final_softsub.mp4` (자막 트랙 별도 임베드) |
+| 3 | **SRT 동봉** | `chNN.srt` (UTF-8 정규화) |
+| 4 | **Shotcut 프로젝트** | `chNN_project.mlt` (GUI에서 미세조정 후 melt.exe로 재렌더 가능) |
+| 5 | **렌더 리포트** | `render_report.json` (씬별 길이·렌더 시간·경고) |
+
+## 설치
+
+### Windows
+```powershell
+setup.bat
 ```
 
-## 사전 준비
+### macOS / Linux
+```bash
+chmod +x setup.sh run.sh
+./setup.sh
+```
 
-1. **Python 3.11+**
-2. **ffmpeg 7.x** (PATH에 등록)
-   ```powershell
-   winget install Gyan.FFmpeg
-   ```
-3. **Python 패키지**
-   ```powershell
-   pip install -r requirements.txt
-   ```
-4. **한글 폰트** (자동 탐지: Pretendard → 나눔고딕 → 맑은 고딕)
+스크립트가 자동으로 처리하는 것:
+- 가상환경 `.venv/` 생성
+- `requirements.txt` 설치 (`pysrt`, `lxml`, `streamlit`)
+- ffmpeg 존재 확인 (없으면 설치 명령 안내)
+- `_assets/` 폴더 생성
+
+**ffmpeg는 별도 설치 필요** (보안상 자동 설치 안 함):
+- Windows: `winget install Gyan.FFmpeg`
+- macOS: `brew install ffmpeg`
+- Ubuntu/Debian: `sudo apt install ffmpeg`
+
+설치 후 새 터미널을 열어주세요 (PATH 갱신).
 
 ## 실행
 
-레포 루트에서 실행:
-
+### Windows
 ```powershell
-cd d:\00work\260523-mp4-maker
-
-# 풀 렌더
-python -m mp4maker _assets\ch04_bundle
-
-# 단일 씬만 (디버깅)
-python -m mp4maker _assets\ch04_bundle --only 1 --keep-work
-
-# 환경 점검만
-python -m mp4maker --probe
+run.bat
 ```
 
-### 옵션
-
-| 옵션 | 기본값 | 설명 |
-|------|--------|------|
-| `--resolution` | 1920x1080 | 출력 해상도 |
-| `--fps` | 30 | 프레임레이트 |
-| `--crossfade` | 0.6 | 씬 간 크로스페이드 (초) |
-| `--kenburns` | auto | `auto` 또는 `off` |
-| `--no-soft-sub` | (off) | softsub mp4를 만들지 않음 |
-| `--no-mlt` | (off) | MLT XML을 만들지 않음 |
-| `--keep-work` | (off) | `_work/` 임시 폴더 보존 |
-| `--jobs` | CPU 코어 수 | 씬 병렬 렌더 수 |
-| `--only` | (없음) | 특정 씬만 (예: `--only 1` 또는 `--only 1,3,5`) |
-
-## 산출물 (각 번들의 draft/)
-
-```
-chNN_final.mp4              burn-in 본편 (제출용)
-chNN_final_softsub.mp4      burn-in + soft sub 트랙 임베드
-chNN.srt                    동봉용 SRT
-chNN_project.mlt            Shotcut/Kdenlive 프로젝트
-render_report.json          씬별 길이·사용 파일·렌더 시간·경고
-_work/                      디버깅 임시 (기본 자동 삭제, --keep-work 시 보존)
+### macOS / Linux
+```bash
+./run.sh
 ```
 
-## 검증 순서
+브라우저 탭이 자동으로 열리며 `http://localhost:8501` 에 UI가 뜹니다.
+사이드바에서 번들·해상도·자막 옵션을 고르고 **▶ 렌더 시작** 버튼을 누르면 진행률 바와 실시간 로그가 표시됩니다.
 
+CLI를 직접 쓰고 싶다면:
 ```powershell
-# 1) 환경 점검
+.venv\Scripts\activate           # Windows
+source .venv/bin/activate        # macOS/Linux
 python -m mp4maker --probe
-
-# 2) ch04 1씬만 렌더 (폰트·자막·Ken Burns 시각 확인)
-python -m mp4maker _assets\ch04_bundle --only 1 --keep-work
-
-# 3) ch04 풀 렌더
 python -m mp4maker _assets\ch04_bundle
-
-# 4) Shotcut에서 draft/ch04_project.mlt 열어 검수
-
-# 5) 1·2장 동일 명령
-python -m mp4maker _assets\ch01_bundle
-python -m mp4maker _assets\ch02_bundle
 ```
+
+자세한 옵션은 [docs/CLI.md](docs/CLI.md) 참고.
+
+## 폴더 구조
+
+레포에는 **소스 코드만** 들어 있습니다. 영상 만들 재료는 용량이 커서 git에 올리지 않으며, **사용자가 `_assets/` 폴더에 직접 채워야** 합니다.
+
+```
+mp4maker-repo/
+├── mp4maker/                  도구 소스 (Python 패키지)
+├── app.py                     웹 UI (Streamlit)
+├── setup.bat / setup.sh       환경 셋업
+├── run.bat / run.sh           웹 UI 실행
+├── requirements.txt
+├── README.md
+├── docs/                      상세 문서
+└── _assets/                   ← 사용자가 채움 (git 제외)
+    ├── ch01_bundle/
+    ├── ch02_bundle/
+    └── chNN_bundle/
+        ├── script/      chNN_script.json
+        ├── images/      chNN_XX_*.{jpeg,jpg,png}
+        ├── audio/       chNN_XX_narration.wav
+        ├── subtitles/   chNN_XX_narration.srt (+ chNN.srt 통합본)
+        └── draft/       도구가 산출물을 채움
+```
+
+각 폴더의 출처:
+- `script/` — [ScriptForge](https://github.com/leedonwoo2827-ship-it/scriptforge)
+- `images/` — [FlowGenie](https://github.com/leedonwoo2827-ship-it/flowgenie) (veo3 크롬 확장)
+- `audio/` + `subtitles/` — [VoiceWright](https://github.com/leedonwoo2827-ship-it/voicewright) 또는 Supertone 3
+
+번들 스키마·파일명 규칙 전체는 [docs/BUNDLE_FORMAT.md](docs/BUNDLE_FORMAT.md) 참고.
+
+## 문서
+
+| 문서 | 내용 |
+|---|---|
+| [docs/BUNDLE_FORMAT.md](docs/BUNDLE_FORMAT.md) | `_assets/chNN_bundle/` 폴더·파일 명명 규칙, JSON 스키마, 자막 우선순위, 무결성 검증 |
+| [docs/CLI.md](docs/CLI.md) | 모든 CLI 옵션, 자주 쓰는 조합, stdout 태그 (진행률 파싱용) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 처리 파이프라인, 모듈 책임, 핵심 결정(자막 자동 분할·Ken Burns·MLT 등), ffmpeg filter graph |
+
+## 검증 순서 (처음 받았을 때)
+
+1. `setup.bat` / `./setup.sh` — 환경 셋업
+2. ffmpeg 설치 (winget/brew/apt) → 새 터미널 열기
+3. `_assets/chNN_bundle/` 채워 넣기
+4. `run.bat` / `./run.sh` → 웹 UI에서 "환경 점검" 버튼
+5. ch04 번들 1씬만 렌더 (사이드바 "특정 씬만" → 1) → 자막·Ken Burns 시각 확인
+6. 만족하면 풀 렌더
+7. Shotcut에서 `draft/chNN_project.mlt` 열어 수동 검수 (선택)
+
+## 파이프라인 전체
+
+```
+StoryLens   →   ScriptForge   →   FlowGenie     →   VoiceWright/Supertone   →   mp4maker
+(상담/기획)     (대본 JSON)      (장면 이미지)      (자막 + 음성)               (로컬 MP4)
+```
+
+원본 SceneWeaver-CapCut(CapCut 데스크톱 드래프트 생성) 자리를 mp4maker가 대체.
+입력 인터페이스(폴더 구조·명명 규칙·JSON 스키마)는 호환을 유지하므로 같은 번들을 양쪽 어디에도 넣을 수 있습니다.
+
+## 라이선스
+
+MIT (예정).
