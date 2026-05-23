@@ -25,8 +25,14 @@ def write_scene_srts(
     bundle: Bundle,
     timeline: list[TimelineEntry],
     work_dir: Path,
+    split_long_cues: bool = True,
+    max_cue_duration: float = 5.0,
 ) -> dict[int, Path]:
     """For every scene, write `work_dir / scNN.srt` with cues starting at 00:00:00.
+
+    If split_long_cues=True, any cue longer than max_cue_duration seconds is broken
+    into sentence-level sub-cues with proportional timing so subtitles change with
+    the narration instead of one giant block sitting on screen.
 
     Returns: {scene_index: path_to_srt}
     """
@@ -50,11 +56,99 @@ def write_scene_srts(
         else:
             cues = _from_narration_text(scene.narration_text, entry.duration)
 
+        if split_long_cues:
+            cues = _split_long_cues(cues, max_cue_duration=max_cue_duration)
+
         path = work_dir / f"sc{scene.index:02d}.srt"
         _write_srt(cues, path)
         out[scene.index] = path
 
     return out
+
+
+def _split_long_cues(
+    cues: list[pysrt.SubRipItem],
+    max_cue_duration: float = 5.0,
+) -> list[pysrt.SubRipItem]:
+    """Break any cue longer than max_cue_duration into sentence-level sub-cues.
+
+    Sentences split on . ? ! 。 ！ ？. Sub-cue durations are proportional to
+    character counts, clamped to [_MIN_CUE, _MAX_CUE].
+    """
+    out: list[pysrt.SubRipItem] = []
+    next_idx = 1
+    max_ms = int(max_cue_duration * 1000)
+
+    for cue in cues:
+        text = (cue.text or "").strip()
+        if not text:
+            continue
+        start_ms = _to_ms(cue.start)
+        end_ms = _to_ms(cue.end)
+        dur_ms = max(0, end_ms - start_ms)
+
+        if dur_ms <= max_ms:
+            out.append(pysrt.SubRipItem(
+                index=next_idx,
+                start=_from_ms(start_ms),
+                end=_from_ms(end_ms),
+                text=text,
+            ))
+            next_idx += 1
+            continue
+
+        parts = [p.strip() for p in _PUNCT.split(text) if p.strip()]
+        if len(parts) <= 1:
+            parts = _split_by_length(text, target_chars=24)
+        if not parts:
+            parts = [text]
+
+        total_chars = sum(len(p) for p in parts) or 1
+        cursor_ms = start_ms
+        last_i = len(parts) - 1
+        for i, part in enumerate(parts):
+            share = len(part) / total_chars
+            sub_dur = int(dur_ms * share)
+            sub_dur = max(int(_MIN_CUE * 1000), min(int(_MAX_CUE * 1000), sub_dur))
+            sub_start = cursor_ms
+            sub_end = min(end_ms, sub_start + sub_dur)
+            if i == last_i:
+                sub_end = end_ms
+            if sub_end <= sub_start:
+                sub_end = sub_start + int(_MIN_CUE * 1000)
+            out.append(pysrt.SubRipItem(
+                index=next_idx,
+                start=_from_ms(sub_start),
+                end=_from_ms(sub_end),
+                text=part,
+            ))
+            next_idx += 1
+            cursor_ms = sub_end
+
+    return out
+
+
+def _split_by_length(text: str, target_chars: int = 24) -> list[str]:
+    """When sentence punctuation is absent, split on Korean clausal commas / spaces."""
+    if len(text) <= target_chars:
+        return [text]
+    # Prefer splitting on Korean conjunctions and commas.
+    soft = re.split(r"(?<=[,，])\s+|(?<=\s)(?=그러나|하지만|그리고|그러므로|그래서)", text)
+    soft = [s.strip() for s in soft if s.strip()]
+    if all(len(s) <= target_chars * 1.5 for s in soft) and len(soft) > 1:
+        return soft
+    # Fallback: hard wrap by character count at word/space boundary.
+    out: list[str] = []
+    buf = ""
+    for token in re.findall(r"\S+\s*", text):
+        if len(buf) + len(token) > target_chars and buf:
+            out.append(buf.strip())
+            buf = token
+        else:
+            buf += token
+    if buf.strip():
+        out.append(buf.strip())
+    return out or [text]
 
 
 def _load_srt(path: Path) -> list[pysrt.SubRipItem]:

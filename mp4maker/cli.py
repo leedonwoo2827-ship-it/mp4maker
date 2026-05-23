@@ -76,7 +76,14 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) - 1),
                    help="parallel scene renders (default: cpu-1)")
     p.add_argument("--only", default="", help="render only listed scenes (e.g. '1' or '1,3,5')")
-    p.add_argument("--font-size", type=int, default=42)
+    p.add_argument("--font-size", type=int, default=16,
+                   help="subtitle font size in ASS units (default 16; libass scales to video height)")
+    p.add_argument("--margin-v", type=int, default=40,
+                   help="distance in ASS units from subtitle baseline to bottom of frame (default 40)")
+    p.add_argument("--no-split-subs", action="store_true",
+                   help="keep long SRT cues as-is instead of breaking into sentences")
+    p.add_argument("--max-cue-seconds", type=float, default=5.0,
+                   help="when splitting, max seconds per cue (default 5.0)")
     p.add_argument("--version", action="version", version=f"mp4maker {__version__}")
     return p
 
@@ -163,8 +170,13 @@ def _cmd_render(args, bundle_dir: Path) -> int:
     bundle.draft_dir.mkdir(parents=True, exist_ok=True)
     bundle.work_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[subs]  writing per-scene SRTs to {bundle.work_dir}")
-    scene_srts = write_scene_srts(bundle, timeline, bundle.work_dir)
+    split_mode = "off" if args.no_split_subs else f"auto (<= {args.max_cue_seconds:.1f}s/cue)"
+    print(f"[subs]  writing per-scene SRTs to {bundle.work_dir}  split={split_mode}", flush=True)
+    scene_srts = write_scene_srts(
+        bundle, timeline, bundle.work_dir,
+        split_long_cues=not args.no_split_subs,
+        max_cue_duration=args.max_cue_seconds,
+    )
 
     cfg = SceneRenderConfig(
         width=width,
@@ -172,10 +184,12 @@ def _cmd_render(args, bundle_dir: Path) -> int:
         fps=args.fps,
         font_name=font_name,
         font_size=args.font_size,
+        margin_v=args.margin_v,
         kenburns_mode=args.kenburns,
     )
 
-    print(f"[render] {len(timeline)} scenes  jobs={args.jobs}  res={width}x{height}@{args.fps}fps")
+    total_scenes = len(timeline)
+    print(f"[render] {total_scenes} scenes  jobs={args.jobs}  res={width}x{height}@{args.fps}fps", flush=True)
     t_start = time.time()
     render_times: dict[int, float] = {}
     scene_outs: dict[int, Path] = {}
@@ -189,12 +203,19 @@ def _cmd_render(args, bundle_dir: Path) -> int:
         tasks.append((entry, srt, out, cfg, log, cmd_dump))
         scene_outs[entry.scene.index] = out
 
+    completed = 0
     if args.jobs <= 1 or len(tasks) == 1:
         for (entry, srt, out, cfg_, log, cmd_dump) in tasks:
+            print(f"[scene] sc{entry.scene.index:02d} start  ({entry.duration:.1f}s)", flush=True)
             t0 = time.time()
             render_scene(entry, srt, out, cfg_, log_path=log, cmd_dump_path=cmd_dump)
             render_times[entry.scene.index] = time.time() - t0
-            print(f"  sc{entry.scene.index:02d} done  ({render_times[entry.scene.index]:.1f}s)")
+            completed += 1
+            print(
+                f"[scene] sc{entry.scene.index:02d} done  ({render_times[entry.scene.index]:.1f}s)  "
+                f"progress={completed}/{total_scenes}",
+                flush=True,
+            )
     else:
         with ProcessPoolExecutor(max_workers=args.jobs) as ex:
             fut_to_idx = {}
@@ -205,9 +226,14 @@ def _cmd_render(args, bundle_dir: Path) -> int:
                 idx, t0 = fut_to_idx[fut]
                 fut.result()
                 render_times[idx] = time.time() - t0
-                print(f"  sc{idx:02d} done  ({render_times[idx]:.1f}s)")
+                completed += 1
+                print(
+                    f"[scene] sc{idx:02d} done  ({render_times[idx]:.1f}s)  "
+                    f"progress={completed}/{total_scenes}",
+                    flush=True,
+                )
 
-    print(f"[concat] crossfade={args.crossfade}s")
+    print(f"[stage] concat  crossfade={args.crossfade}s", flush=True)
     final_mp4 = bundle.draft_dir / f"{bundle.chapter_id}_final.mp4"
     ordered_clips = [scene_outs[e.scene.index] for e in timeline]
     concat_with_crossfade(
@@ -229,16 +255,18 @@ def _cmd_render(args, bundle_dir: Path) -> int:
 
     softsub_mp4: Path | None = None
     if not args.no_soft_sub and side_srt is not None:
+        print("[stage] softsub", flush=True)
         softsub_mp4 = bundle.draft_dir / f"{bundle.chapter_id}_final_softsub.mp4"
         mux_softsub(final_mp4, side_srt, softsub_mp4, log_path=bundle.work_dir / "ffmpeg_softsub.log")
-        print(f"[done]  {softsub_mp4}")
+        print(f"[done]  {softsub_mp4}", flush=True)
 
     mlt_path: Path | None = None
     if not args.no_mlt:
+        print("[stage] mlt", flush=True)
         mlt_path = bundle.draft_dir / f"{bundle.chapter_id}_project.mlt"
         write_mlt(bundle, timeline, scene_srts, mlt_path, fps=args.fps,
                   width=width, height=height, crossfade=args.crossfade)
-        print(f"[done]  {mlt_path}")
+        print(f"[done]  {mlt_path}", flush=True)
 
     total_render = time.time() - t_start
     report = build_report(

@@ -15,12 +15,12 @@ class SceneRenderConfig:
     height: int = 1080
     fps: int = 30
     font_name: str = "Pretendard"
-    font_size: int = 42
-    margin_v: int = 80
+    font_size: int = 16            # ASS units; libass scales to PlayResY internally
+    margin_v: int = 40             # bottom margin in ASS units (=> ~bottom 5% on 1080p)
     crf: int = 18
     preset: str = "medium"
     audio_bitrate: str = "192k"
-    kenburns_mode: str = "auto"   # "auto" or "off"
+    kenburns_mode: str = "auto"    # "auto" or "off"
 
 
 def render_scene(
@@ -58,14 +58,20 @@ def render_scene(
     # ffmpeg subtitles filter path needs forward slashes and an escaped colon for Windows.
     srt_for_filter = _escape_for_subtitles_filter(srt_path)
 
+    # Alignment=2 → bottom-center. MarginV is the gap (in ASS units) from the
+    # bottom of the frame to the bottom of the subtitle box, so small MarginV pushes
+    # the line closer to the lower edge. BorderStyle=1 = outline+shadow (no opaque box).
     style = (
         f"FontName={cfg.font_name},"
         f"FontSize={cfg.font_size},"
         "PrimaryColour=&H00FFFFFF,"
         "OutlineColour=&H00000000,"
+        "BackColour=&H80000000,"
         "BorderStyle=1,"
         "Outline=2,Shadow=1,"
+        "Bold=1,"
         "Alignment=2,"
+        "MarginL=80,MarginR=80,"
         f"MarginV={cfg.margin_v}"
     )
 
