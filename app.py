@@ -36,6 +36,44 @@ def list_bundles() -> list[Path]:
     return out
 
 
+def scan_bundles_with_reasons() -> tuple[list[Path], list[dict]]:
+    """Same scan as list_bundles, but also reports folders that look like bundles
+    but failed a required-folder/required-file check, with a per-folder reason list."""
+    valid: list[Path] = []
+    rejected: list[dict] = []
+    if not ASSETS_DIR.is_dir():
+        return valid, rejected
+    for p in sorted(ASSETS_DIR.iterdir()):
+        if not p.is_dir():
+            continue
+        # Heuristic: anything under _assets/ that looks like a bundle (has any of the 4 expected subdirs)
+        # gets diagnosed; pure noise folders are skipped silently.
+        subdirs = {"script": p / "script", "images": p / "images",
+                   "audio": p / "audio", "subtitles": p / "subtitles"}
+        if not any(d.is_dir() for d in subdirs.values()):
+            continue
+
+        reasons: list[str] = []
+        if not subdirs["script"].is_dir():
+            reasons.append("`script/` 폴더 없음 (ScriptForge JSON)")
+        elif not any(subdirs["script"].glob("*_script.json")):
+            reasons.append("`script/*_script.json` 파일 없음")
+        if not subdirs["images"].is_dir():
+            reasons.append("`images/` 폴더 없음 (FlowGenie 이미지)")
+        elif not any(subdirs["images"].iterdir()):
+            reasons.append("`images/` 비어 있음")
+        if not subdirs["audio"].is_dir():
+            reasons.append("`audio/` 폴더 없음")
+        if not subdirs["subtitles"].is_dir():
+            reasons.append("`subtitles/` 폴더 없음")
+
+        if reasons:
+            rejected.append({"name": p.name, "reasons": reasons})
+        else:
+            valid.append(p)
+    return valid, rejected
+
+
 def load_bundle_safe(bundle_dir: Path):
     """Best-effort load for scene metadata. Returns None on failure (UI keeps working)."""
     try:
@@ -157,9 +195,33 @@ with st.sidebar:
         st.info("🔒 작업 진행 중 — 옵션 변경이 잠겨 있습니다.")
 
     st.header("번들")
-    bundles = list_bundles()
+    bundles, rejected = scan_bundles_with_reasons()
     if not bundles:
-        st.error(f"`_assets/` 아래 `chNN_bundle` 폴더를 찾지 못했습니다.\n\n경로: `{ASSETS_DIR}`")
+        if not ASSETS_DIR.is_dir():
+            st.error(
+                f"`_assets/` 폴더 자체가 없습니다.\n\n경로: `{ASSETS_DIR}`\n\n"
+                "이 폴더를 만들고 그 안에 `chNN_bundle/` 들을 채워주세요."
+            )
+        elif rejected:
+            st.error("사용 가능한 번들이 없습니다. 아래 폴더는 인식 조건을 만족하지 못했습니다:")
+            for r in rejected:
+                st.warning(
+                    f"**`{r['name']}`** 누락:\n\n" +
+                    "\n".join(f"- {reason}" for reason in r["reasons"])
+                )
+            st.info(
+                "**번들이 인식되려면 각 `chNN_bundle/` 안에 4개 폴더가 다 있어야 합니다:**\n\n"
+                "- `script/chNN_script.json` — ScriptForge 산출물\n"
+                "- `images/chNN_XX_*.{jpeg,jpg,png}` — FlowGenie 이미지 (씬당 1장)\n"
+                "- `audio/chNN_XX_narration.{wav,mp3}` — VoiceWright 음성 (씬당 1개)\n"
+                "- `subtitles/chNN_XX_narration.srt` + `chNN.srt` — VoiceWright 자막\n\n"
+                "상세: [docs/BUNDLE_FORMAT.md](https://github.com/leedonwoo2827-ship-it/mp4maker/blob/main/docs/BUNDLE_FORMAT.md)"
+            )
+        else:
+            st.error(
+                f"`_assets/` 아래 `chNN_bundle` 폴더가 하나도 없습니다.\n\n"
+                f"경로: `{ASSETS_DIR}`"
+            )
         st.stop()
 
     bundle = st.selectbox(
