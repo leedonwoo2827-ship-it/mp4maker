@@ -48,31 +48,54 @@ class Bundle:
 
 
 def _find_image(images_dir: Path, chapter_id: str, scene_idx: int, hint: str) -> Optional[Path]:
-    """Find image file. Try JSON hint first, then fall back to chNN_XX* glob across extensions.
+    """Find image file. Try JSON hint first, then fall back across naming variants.
 
     Handles cases where:
-    - JSON says .png but actual is .jpeg
-    - Actual file has _1 suffix the JSON doesn't
-    - Actual file is just chNN_XX.jpeg without descriptive suffix
+    - JSON says .png but actual is .jpeg                            (stem fallback)
+    - Actual file has _1/_2/... suffix the JSON doesn't             (stem_N fallback)
+    - Actual file is just chNN_XX.jpeg without descriptive suffix   (prefix glob)
+    - Actual files dropped the 'ch' prefix entirely (e.g. 22_08_*)  (alt-prefix glob)
     """
     if hint:
         exact = images_dir / hint
         if exact.exists():
             return exact
         stem = Path(hint).stem
+        # 2a) same stem, different extension
         for ext in IMG_EXTS:
             cand = images_dir / f"{stem}{ext}"
             if cand.exists():
                 return cand
+        # 2b) same stem + _N suffix (FlowGenie variants like name_1.jpeg, name_2.jpeg)
+        for ext in IMG_EXTS:
+            variants = sorted(
+                p for p in images_dir.glob(f"{stem}_*{ext}") if p.is_file()
+            )
+            if variants:
+                return variants[0]  # lexical order picks _1 first
 
-    prefix = f"{chapter_id}_{scene_idx:02d}"
+    # Try both "ch22_08*" and "22_08*" prefix variants (some authors drop the 'ch')
+    numeric_part = chapter_id[2:] if chapter_id.startswith("ch") else chapter_id
+    prefixes = [
+        f"{chapter_id}_{scene_idx:02d}",       # ch22_08
+        f"{numeric_part}_{scene_idx:02d}",     # 22_08
+    ]
     matches: list[Path] = []
-    for ext in IMG_EXTS:
-        matches.extend(p for p in images_dir.glob(f"{prefix}*{ext}") if p.is_file())
+    for prefix in prefixes:
+        for ext in IMG_EXTS:
+            matches.extend(p for p in images_dir.glob(f"{prefix}*{ext}") if p.is_file())
     if not matches:
         return None
-    matches.sort(key=lambda p: (len(p.name), p.name))
-    return matches[0]
+    # Dedupe while preserving lexical "_1 before _2" preference, prefer shorter names first.
+    seen: set[Path] = set()
+    deduped: list[Path] = []
+    for p in matches:
+        if p in seen:
+            continue
+        seen.add(p)
+        deduped.append(p)
+    deduped.sort(key=lambda p: (len(p.name), p.name))
+    return deduped[0]
 
 
 def _find_audio(audio_dir: Path, chapter_id: str, scene_idx: int) -> Optional[Path]:
