@@ -164,8 +164,15 @@ def load_bundle(bundle_root: Path) -> Bundle:
 
     scenes: list[Scene] = []
     bundle_warnings: list[str] = []
-    for raw in raw_scenes:
-        idx = int(raw.get("scene"))
+    for pos, raw in enumerate(raw_scenes):
+        # ScriptForge schema evolved: older bundles used 'scene', newer ones use
+        # 'scene_number'. Accept either; fall back to array position (1-based).
+        raw_idx = raw.get("scene")
+        if raw_idx is None:
+            raw_idx = raw.get("scene_number")
+        if raw_idx is None:
+            raw_idx = pos + 1
+        idx = int(raw_idx)
         img = _find_image(images_dir, chapter_id, idx, raw.get("image_filename") or "")
         aud = _find_audio(audio_dir, chapter_id, idx)
         sub = _find_subtitle(subs_dir, chapter_id, idx)
