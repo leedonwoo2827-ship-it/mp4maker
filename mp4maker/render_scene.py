@@ -21,6 +21,7 @@ class SceneRenderConfig:
     preset: str = "medium"
     audio_bitrate: str = "192k"
     kenburns_mode: str = "auto"    # "auto" or "off"
+    burn: bool = True              # False → 자막을 굽지 않은 클린 영상(별도 .srt만)
 
 
 def render_scene(
@@ -84,9 +85,14 @@ def render_scene(
         f"pad={over_w}:{over_h}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[over];"
         # zoompan back down to target — produces fps frames over duration
         f"[over]zoompan=z='{kb.z_expr}':x='{kb.x_expr}':y='{kb.y_expr}':"
-        f"d={d_frames}:fps={fps}:s={W}x{H}[zoomed];"
-        f"[zoomed]subtitles='{srt_for_filter}':force_style='{style}'[v]"
+        f"d={d_frames}:fps={fps}:s={W}x{H}[zoomed]"
     )
+    # 자막 굽기(하드번) — burn=False 면 자막 필터를 빼서 클린 영상(별도 .srt 만 사용).
+    if cfg.burn:
+        filter_v += f";[zoomed]subtitles='{srt_for_filter}':force_style='{style}'[v]"
+        v_label = "[v]"
+    else:
+        v_label = "[zoomed]"
 
     cmd = [
         "ffmpeg", "-y",
@@ -95,7 +101,7 @@ def render_scene(
         "-i", str(scene.image_path),
         "-i", str(scene.audio_path),
         "-filter_complex", filter_v,
-        "-map", "[v]",
+        "-map", v_label,
         "-map", "1:a:0",
         "-t", f"{duration:.3f}",
         "-c:v", "libx264",

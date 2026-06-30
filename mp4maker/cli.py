@@ -71,6 +71,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--crossfade", type=float, default=0.6, help="scene-boundary crossfade seconds")
     p.add_argument("--kenburns", choices=["auto", "off"], default="auto")
     p.add_argument("--no-soft-sub", action="store_true", help="skip softsub mp4")
+    p.add_argument("--no-burn", action="store_true",
+                   help="do NOT burn subtitles into the video (clean MP4 + side .srt only)")
     p.add_argument("--no-mlt", action="store_true", help="skip MLT XML")
     p.add_argument("--keep-work", action="store_true", help="keep _work/ temp folder")
     p.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 4) - 1),
@@ -189,6 +191,7 @@ def _cmd_render(args, bundle_dir: Path) -> int:
         font_size=args.font_size,
         margin_v=args.margin_v,
         kenburns_mode=args.kenburns,
+        burn=not args.no_burn,
     )
 
     total_scenes = len(timeline)
